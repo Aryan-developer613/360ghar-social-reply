@@ -86,6 +86,14 @@ interface DashData {
   top_opportunities: OpportunityItem[];
   subscription: Subscription;
   setup_status?: SetupStatus;
+  drafts_count?: number;
+  published_count?: number;
+}
+
+interface DraftCounts {
+  drafting: number;
+  published: number;
+  total: number;
 }
 
 interface UsageData {
@@ -232,6 +240,7 @@ export default function DashboardPage() {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [visibility, setVisibility] = useState<VisibilitySummary | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [draftCounts, setDraftCounts] = useState<DraftCounts | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [bizName, setBizName] = useState("");
   const [bizDesc, setBizDesc] = useState("");
@@ -264,34 +273,71 @@ export default function DashboardPage() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [dashRes, usageRes, visRes, actRes] = await Promise.allSettled([
-        apiRequest<DashData>(
+      let dashData: DashData | null = null;
+      let usageData: UsageData | null = null;
+      let visData: VisibilitySummary | null = null;
+      let actData: ActivityItem[] = [];
+      let draftCountsData: DraftCounts | null = null;
+
+      try {
+        dashData = await apiRequest<DashData>(
           withProjectId("/v1/dashboard", selectedProjectId),
           {},
           token,
-        ),
-        apiRequest<UsageData>(
+        );
+      } catch (err: unknown) {
+        console.warn("Failed to load dashboard:", err);
+        toast.error("Failed to load dashboard");
+      }
+
+      try {
+        usageData = await apiRequest<UsageData>(
           withProjectId("/v1/usage", selectedProjectId),
           {},
           token,
-        ),
-        apiRequest<VisibilitySummary>(
+        );
+      } catch (err: unknown) {
+        console.warn("Failed to load usage:", err);
+        toast.error("Failed to load usage data");
+      }
+
+      try {
+        visData = await apiRequest<VisibilitySummary>(
           withProjectId("/v1/visibility/summary", selectedProjectId),
           {},
           token,
-        ),
-        apiRequest<{ items: ActivityItem[] }>("/v1/activity", {}, token),
-      ]);
+        );
+      } catch (err: unknown) {
+        console.warn("Failed to load visibility:", err);
+        toast.error("Failed to load visibility data");
+      }
 
-      if (dashRes.status === "fulfilled") setDash(dashRes.value);
-      if (usageRes.status === "fulfilled") setUsage(usageRes.value);
-      if (visRes.status === "fulfilled") setVisibility(visRes.value);
-      if (actRes.status === "fulfilled")
-        setActivity(actRes.value.items || []);
-    } catch (err: unknown) {
-      toast.error("Failed to load dashboard", getErrorMessage(err));
+      try {
+        draftCountsData = await apiRequest<DraftCounts>(
+          withProjectId("/v1/drafts/count", selectedProjectId),
+          {},
+          token,
+        );
+      } catch (err: unknown) {
+        console.warn("Failed to load draft counts:", err);
+      }
+
+      try {
+        const res = await apiRequest<{ items: ActivityItem[] }>("/v1/activity", {}, token);
+        actData = res.items || [];
+      } catch (err: unknown) {
+        console.warn("Failed to load activity:", err);
+        toast.error("Failed to load activity data");
+      }
+
+      setDash(dashData);
+      setUsage(usageData);
+      setVisibility(visData);
+      setActivity(actData);
+      setDraftCounts(draftCountsData);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   /* ---- create project (unchanged) ---- */
@@ -628,12 +674,12 @@ export default function DashboardPage() {
           },
           {
             label: "Drafts Ready",
-            value: 0,
+            value: draftCounts?.drafting ?? dash?.drafts_count ?? topOpps.filter((o: OpportunityItem) => o.status === "drafting").length,
             icon: FileText,
           },
           {
             label: "Published",
-            value: 0,
+            value: draftCounts?.published ?? dash?.published_count ?? topOpps.filter((o: OpportunityItem) => o.status === "posted").length,
             icon: Send,
           },
         ]}

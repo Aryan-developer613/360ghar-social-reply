@@ -191,7 +191,9 @@ export default function VisibilityPage() {
               {promptSets.map(ps => {
                 const psResults = promptResults.filter(r => ps.prompts.includes(r.prompt_text));
                 const lastChecked = psResults.length > 0 ? psResults[0].completed_at : null;
-                const visScore = psResults.filter(r => r.brand_mentioned).length > 0 ? 75 : 25;
+                const visScore = psResults.length > 0
+                  ? Math.round((psResults.filter(r => r.brand_mentioned).length / psResults.length) * 100)
+                  : 0;
                 return (
                   <Card key={ps.id} className="p-5 rounded-xl">
                     <div className="flex justify-between items-start mb-3">

@@ -61,6 +61,7 @@ export default function BrandPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [brandLoadError, setBrandLoadError] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isFilling, setIsFilling] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
@@ -91,6 +92,7 @@ export default function BrandPage() {
       })
       .catch((err) => {
         error("Failed to load brand", err.message);
+        setBrandLoadError(true);
         setLoading(false);
       });
   }, [project, token, error]);
@@ -165,6 +167,17 @@ export default function BrandPage() {
   }
 
   if (!brand) {
+    if (brandLoadError) {
+      return (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center p-8 text-center">
+            <span className="text-4xl mb-4">⚠️</span>
+            <h3 className="text-base font-semibold mb-1">Failed to load brand profile</h3>
+            <p className="text-sm text-muted-foreground">There was an error loading your brand data. Please try refreshing the page.</p>
+          </CardContent>
+        </Card>
+      );
+    }
     return (
       <Card>
         <CardContent className="flex flex-col items-center justify-center p-8 text-center">

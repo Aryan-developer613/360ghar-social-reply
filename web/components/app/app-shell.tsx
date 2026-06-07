@@ -71,8 +71,12 @@ interface NotificationItem {
   message: string;
   icon: string;
   link?: string;
-  read: boolean;
+  is_read: boolean;
   created_at: string;
+}
+
+function isNotificationRead(notification: NotificationItem): boolean {
+  return notification.is_read;
 }
 
 const NAV_SECTIONS = [
@@ -101,7 +105,6 @@ const NAV_SECTIONS = [
       { href: "/app/agents", label: "Agents Feed", icon: Radar },
       { href: "/app/discovery", label: "Reddit Radar", icon: Radar },
       { href: "/app/content", label: "Content Studio", icon: FileText },
-      { href: "/app/content-studio", label: "Content Studio (New)", icon: FileText },
     ],
   },
   {
@@ -320,12 +323,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
   async function loadNotifications() {
     try {
       const res = await apiRequest<{ items: NotificationItem[] }>(
-        `/v1/notifications?workspace_id=${selectedProjectId}`,
+        "/v1/notifications",
         {},
         token
       );
       setNotifications(res.items || []);
-      const unread = (res.items || []).filter((n) => !n.read).length;
+      const unread = (res.items || []).filter((n) => !isNotificationRead(n)).length;
       setNotifCount(unread);
     } catch {
       // Silently ignore — notifications are non-critical and may hit rate limits during heavy usage
@@ -335,7 +338,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   async function markAsRead(notificationId: number) {
     try {
       await apiRequest(`/v1/notifications/${notificationId}/read`, { method: "PUT" }, token);
-      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n)));
+      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n)));
       setNotifCount((prev) => Math.max(prev - 1, 0));
     } catch (error) {
       console.error("Failed to mark as read:", error);
@@ -345,7 +348,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   async function markAllAsRead() {
     try {
       await apiRequest("/v1/notifications/read-all", { method: "PUT" }, token);
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setNotifCount(0);
     } catch (error) {
       console.error("Failed to mark all as read:", error);
@@ -353,7 +356,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
 
   function handleNotificationClick(notif: NotificationItem) {
-    if (!notif.read) {
+    if (!isNotificationRead(notif)) {
       void markAsRead(notif.id);
     }
     if (notif.link) {
@@ -732,7 +735,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <PopoverContent align="end" className="w-80 p-0">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                     <strong className="text-sm">Notifications</strong>
-                    {notifications.some((n) => !n.read) && (
+                    {notifications.some((n) => !isNotificationRead(n)) && (
                       <Button
                         variant="ghost"
                         size="xs"
@@ -768,7 +771,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                               }}
                               className={`px-4 py-2.5 border-b border-border last:border-b-0 transition-colors ${
                                 notif.link ? "cursor-pointer hover:bg-muted/50" : "cursor-default"
-                              } ${!notif.read ? "bg-primary/[0.04] border-l-[3px] border-l-primary dark:bg-primary/[0.08]" : ""}`}
+                              } ${!isNotificationRead(notif) ? "bg-primary/[0.04] border-l-[3px] border-l-primary dark:bg-primary/[0.08]" : ""}`}
                             >
                               <div className="font-semibold text-[13px] mb-0.5">{notif.title}</div>
                               <div className="text-xs text-muted-foreground leading-snug">{notif.message}</div>
@@ -812,7 +815,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <PopoverContent align="end" className="w-72 p-0">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                     <strong className="text-sm">Notifications</strong>
-                    {notifications.some((n) => !n.read) && (
+                    {notifications.some((n) => !isNotificationRead(n)) && (
                       <Button
                         variant="ghost"
                         size="xs"
@@ -848,7 +851,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                               }}
                               className={`px-4 py-2.5 border-b border-border last:border-b-0 transition-colors ${
                                 notif.link ? "cursor-pointer hover:bg-muted/50" : "cursor-default"
-                              } ${!notif.read ? "bg-primary/[0.04] border-l-[3px] border-l-primary dark:bg-primary/[0.08]" : ""}`}
+                              } ${!isNotificationRead(notif) ? "bg-primary/[0.04] border-l-[3px] border-l-primary dark:bg-primary/[0.08]" : ""}`}
                             >
                               <div className="font-semibold text-[13px] mb-0.5">{notif.title}</div>
                               <div className="text-xs text-muted-foreground leading-snug">{notif.message}</div>

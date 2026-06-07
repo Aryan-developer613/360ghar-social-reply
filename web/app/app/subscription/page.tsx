@@ -1,16 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Loader2, Sparkles, Tag } from "lucide-react";
+import { Check, Sparkles } from "lucide-react";
 
 import { useAuth } from "@/components/auth/auth-provider";
 import { useSelectedProjectId } from "@/hooks/use-selected-project";
 import { useToast } from "@/stores/toast";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress, ProgressIndicator, ProgressTrack } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,8 +15,6 @@ import { PageHeader } from "@/components/shared/page-header";
 import {
   getCurrentSubscription,
   getPlans,
-  redeemCode,
-  upgradePlan,
   type Plan,
   type Subscription,
 } from "@/lib/api/billing";
@@ -51,9 +46,6 @@ export default function SubscriptionPage() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [upgrading, setUpgrading] = useState<string | null>(null);
-  const [redeemLoading, setRedeemLoading] = useState(false);
-  const [redeemCodeValue, setRedeemCodeValue] = useState("");
 
   const loadBilling = useCallback(async () => {
     if (!token) return;
@@ -68,11 +60,11 @@ export default function SubscriptionPage() {
       setSubscription(subRes);
       setUsage(usageRes);
     } catch (err: unknown) {
-      toast.error("Failed to load subscription", getErrorMessage(err));
+      toast.error("Failed to load access details", getErrorMessage(err));
     } finally {
       setLoading(false);
     }
-    // loadBilling is intentionally decoupled from toast identity (stable toast methods)
+    // loadBilling is intentionally decoupled from toast identity (stable toast methods).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, projectId]);
 
@@ -85,47 +77,11 @@ export default function SubscriptionPage() {
     [plans, subscription],
   );
 
-  async function handleUpgrade(planCode: string) {
-    if (!token) return;
-    if (planCode === subscription?.plan_code) return;
-    setUpgrading(planCode);
-    try {
-      const updated = await upgradePlan(token, planCode);
-      setSubscription(updated);
-      toast.success("Plan updated", `You're now on the ${planCode} plan.`);
-    } catch (err: unknown) {
-      toast.error("Upgrade failed", getErrorMessage(err));
-    } finally {
-      setUpgrading(null);
-    }
-  }
-
-  async function handleRedeem(event: React.FormEvent) {
-    event.preventDefault();
-    if (!token) return;
-    const code = redeemCodeValue.trim();
-    if (!code) {
-      toast.warning("Enter a code", "Paste the redemption code to continue.");
-      return;
-    }
-    setRedeemLoading(true);
-    try {
-      const result = await redeemCode(token, code);
-      toast.success("Code redeemed", result.message ?? `Plan: ${result.plan_code}`);
-      setRedeemCodeValue("");
-      await loadBilling();
-    } catch (err: unknown) {
-      toast.error("Redemption failed", getErrorMessage(err));
-    } finally {
-      setRedeemLoading(false);
-    }
-  }
-
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
-        title="Subscription"
-        description="Manage your plan, view usage, and redeem access codes."
+        title="Early Access"
+        description="Your workspace is fully unlocked during the initial product phase. Usage is shown for visibility only."
       />
 
       {loading ? (
@@ -141,11 +97,10 @@ export default function SubscriptionPage() {
           <UsageSection usage={usage} />
 
           <section>
-            <h3 className="mb-4 text-sm font-semibold text-foreground">Available plans</h3>
+            <h3 className="mb-4 text-sm font-semibold text-foreground">Included access</h3>
             <div className="grid gap-4 md:grid-cols-2">
               {plans.map((plan) => {
                 const isCurrent = plan.code === subscription?.plan_code;
-                const isBusy = upgrading === plan.code;
                 return (
                   <Card key={plan.code} className={isCurrent ? "ring-2 ring-primary" : undefined}>
                     <CardHeader>
@@ -184,49 +139,15 @@ export default function SubscriptionPage() {
                           </div>
                         ))}
                       </dl>
-                      <Button
-                        variant={isCurrent ? "outline" : "default"}
-                        onClick={() => handleUpgrade(plan.code)}
-                        disabled={isCurrent || isBusy}
-                        aria-label={isCurrent ? `${plan.name} is your current plan` : `Switch to ${plan.name}`}
-                      >
-                        {isBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                        {isCurrent ? "Your current plan" : `Switch to ${plan.name}`}
-                      </Button>
+                      <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                        {isCurrent
+                          ? "This is your current unlocked access level."
+                          : "No upgrade is required during early access."}
+                      </p>
                     </CardContent>
                   </Card>
                 );
               })}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-border bg-muted/30 p-5">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Tag className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-foreground">Redeem a code</h3>
-                <p className="text-xs text-muted-foreground">
-                  Have a coupon or access code? Enter it below to unlock features.
-                </p>
-                <form onSubmit={handleRedeem} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-                  <div className="grid flex-1 gap-2">
-                    <Label htmlFor="redeem-code">Redemption code</Label>
-                    <Input
-                      id="redeem-code"
-                      value={redeemCodeValue}
-                      onChange={(event) => setRedeemCodeValue(event.target.value)}
-                      placeholder="e.g., LAUNCH-2026"
-                      disabled={redeemLoading}
-                    />
-                  </div>
-                  <Button type="submit" disabled={redeemLoading || !redeemCodeValue.trim()}>
-                    {redeemLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                    Redeem
-                  </Button>
-                </form>
-              </div>
             </div>
           </section>
         </>
@@ -251,8 +172,8 @@ function CurrentPlanCard({
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle>Current plan</CardTitle>
-            <CardDescription>Your active subscription and billing status.</CardDescription>
+            <CardTitle>Workspace access</CardTitle>
+            <CardDescription>No customer-facing quotas or paid upgrades are enforced in early access.</CardDescription>
           </div>
           {subscription?.status && (
             <Badge variant={subscription.status === "active" ? "default" : "secondary"}>
@@ -264,15 +185,12 @@ function CurrentPlanCard({
       <CardContent>
         {subscription ? (
           <div className="grid gap-4 sm:grid-cols-3">
-            <MetricBlock label="Plan" value={currentPlan?.name ?? subscription.plan_code} />
-            <MetricBlock
-              label="Price"
-              value={currentPlan ? formatPrice(currentPlan.price_monthly) : "—"}
-            />
-            <MetricBlock label="Renews" value={periodEnd ?? "—"} />
+            <MetricBlock label="Access" value={currentPlan?.name ?? subscription.plan_code} />
+            <MetricBlock label="Price" value={currentPlan ? formatPrice(currentPlan.price_monthly) : "Not billed"} />
+            <MetricBlock label="Renewal" value={periodEnd ?? "Not metered"} />
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No subscription found.</p>
+          <p className="text-sm text-muted-foreground">No access record found.</p>
         )}
       </CardContent>
     </Card>
@@ -295,7 +213,7 @@ function UsageSection({ usage }: { usage: UsageResponse | null }) {
   const metricEntries = Object.entries(usage.metrics);
   return (
     <section>
-      <h3 className="mb-4 text-sm font-semibold text-foreground">Usage</h3>
+      <h3 className="mb-4 text-sm font-semibold text-foreground">Usage visibility</h3>
       {metricEntries.length === 0 ? (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">

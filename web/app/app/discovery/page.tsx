@@ -169,31 +169,49 @@ export default function DiscoveryPage() {
       setProject(currentProject);
 
       const projectId = currentProject.id;
-      const [kwRes, subRes, oppRes, campRes] = await Promise.allSettled([
-        apiRequest<Keyword[]>(`/v1/discovery/keywords?project_id=${projectId}`, {}, token),
-        apiRequest<Subreddit[]>(`/v1/discovery/subreddits?project_id=${projectId}`, {}, token),
-        // Load all statuses so the Rejected / Saved / Posted tabs can
-        // filter client-side without a re-fetch.
-        apiRequest<Opportunity[]>(`/v1/opportunities?project_id=${projectId}&status=all&limit=200`, {}, token),
-        apiRequest<Campaign[]>(`/v1/campaigns?project_id=${projectId}`, {}, token),
-      ]);
 
-      if (kwRes.status === "fulfilled") {
-        setKeywords(kwRes.value || []);
+      let kwData: Keyword[] = [];
+      let subData: Subreddit[] = [];
+      let oppData: Opportunity[] = [];
+      let campData: Campaign[] = [];
+
+      try {
+        kwData = await apiRequest<Keyword[]>(`/v1/discovery/keywords?project_id=${projectId}`, {}, token);
+      } catch (err: unknown) {
+        console.warn("Failed to load keywords:", err);
+        error("Failed to load keywords");
       }
-      if (subRes.status === "fulfilled") {
-        setSubreddits(subRes.value || []);
+
+      try {
+        subData = await apiRequest<Subreddit[]>(`/v1/discovery/subreddits?project_id=${projectId}`, {}, token);
+      } catch (err: unknown) {
+        console.warn("Failed to load subreddits:", err);
+        error("Failed to load subreddits");
       }
-      if (oppRes.status === "fulfilled") {
-        setOpportunities(oppRes.value || []);
+
+      try {
+        oppData = await apiRequest<Opportunity[]>(`/v1/opportunities?project_id=${projectId}&status=all&limit=200`, {}, token);
+      } catch (err: unknown) {
+        console.warn("Failed to load opportunities:", err);
+        error("Failed to load opportunities");
       }
-      if (campRes.status === "fulfilled") {
-        setCampaigns(campRes.value || []);
+
+      try {
+        campData = await apiRequest<Campaign[]>(`/v1/campaigns?project_id=${projectId}`, {}, token);
+      } catch (err: unknown) {
+        console.warn("Failed to load campaigns:", err);
+        error("Failed to load campaigns");
       }
+
+      setKeywords(kwData);
+      setSubreddits(subData);
+      setOpportunities(oppData);
+      setCampaigns(campData);
     } catch (err: unknown) {
       error("Failed to load data", getErrorMessage(err));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function addKeyword() {

@@ -65,7 +65,7 @@ function formatActivityLabel(event: ActivityEvent) {
 
 export default function AnalyticsPage() {
   const { token } = useAuth();
-  const { success, error } = useToast();
+  const { error } = useToast();
   const selectedProjectId = useSelectedProjectId();
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState<"7d" | "30d" | "90d" | "all">("30d");
@@ -86,49 +86,94 @@ export default function AnalyticsPage() {
     try {
       const days = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : dateRange === "90d" ? 90 : 365;
 
-      const [overviewRes, trendRes, funnelRes, keywordsRes, subredditsRes, activityRes] = await Promise.allSettled([
-        apiRequest<AnalyticsOverview>(
+      let overviewRes: AnalyticsOverview | null = null;
+      let trendDataRes: TrendData[] = [];
+      let funnelRes: EngagementData | null = null;
+      let keywordsRes: KeywordData[] = [];
+      let subredditsRes: SubredditData[] = [];
+      let activityRes: ActivityEvent[] = [];
+
+      try {
+        const res = await apiRequest<AnalyticsOverview>(
           withProjectId(`/v1/analytics/overview?days=${days}`, selectedProjectId),
           {},
           token
-        ),
-        apiRequest<{ items: TrendData[] }>(
+        );
+        overviewRes = res;
+      } catch (err: unknown) {
+        console.warn("Failed to load overview:", err);
+        error("Failed to load overview data");
+      }
+
+      try {
+        const res = await apiRequest<{ items: TrendData[] }>(
           withProjectId(`/v1/analytics/visibility-trend?days=${days}`, selectedProjectId),
           {},
           token
-        ),
-        apiRequest<EngagementData>(
+        );
+        trendDataRes = res.items || [];
+      } catch (err: unknown) {
+        console.warn("Failed to load trend data:", err);
+        error("Failed to load trend data");
+      }
+
+      try {
+        const res = await apiRequest<EngagementData>(
           withProjectId(`/v1/analytics/engagement`, selectedProjectId),
           {},
           token
-        ),
-        apiRequest<{ items: KeywordData[] }>(
+        );
+        funnelRes = res;
+      } catch (err: unknown) {
+        console.warn("Failed to load engagement:", err);
+        error("Failed to load engagement data");
+      }
+
+      try {
+        const res = await apiRequest<{ items: KeywordData[] }>(
           withProjectId(`/v1/analytics/keywords`, selectedProjectId),
           {},
           token
-        ),
-        apiRequest<{ items: SubredditData[] }>(
+        );
+        keywordsRes = res.items || [];
+      } catch (err: unknown) {
+        console.warn("Failed to load keywords:", err);
+        error("Failed to load keyword data");
+      }
+
+      try {
+        const res = await apiRequest<{ items: SubredditData[] }>(
           withProjectId(`/v1/analytics/subreddits`, selectedProjectId),
           {},
           token
-        ),
-        apiRequest<{ items: ActivityEvent[] }>(
+        );
+        subredditsRes = res.items || [];
+      } catch (err: unknown) {
+        console.warn("Failed to load subreddits:", err);
+        error("Failed to load subreddit data");
+      }
+
+      try {
+        const res = await apiRequest<{ items: ActivityEvent[] }>(
           withProjectId(`/v1/activity`, selectedProjectId),
           {},
           token
-        ),
-      ]);
+        );
+        activityRes = res.items || [];
+      } catch (err: unknown) {
+        console.warn("Failed to load activity:", err);
+        error("Failed to load activity data");
+      }
 
-      if (overviewRes.status === "fulfilled") setOverview(overviewRes.value);
-      if (trendRes.status === "fulfilled") setTrendData(trendRes.value.items || []);
-      if (funnelRes.status === "fulfilled") setEngagementData(funnelRes.value);
-      if (keywordsRes.status === "fulfilled") setKeywords(keywordsRes.value.items || []);
-      if (subredditsRes.status === "fulfilled") setSubreddits(subredditsRes.value.items || []);
-      if (activityRes.status === "fulfilled") setActivity(activityRes.value.items || []);
-    } catch (e: unknown) {
-      error("Failed to load analytics", getErrorMessage(e));
+      setOverview(overviewRes);
+      setTrendData(trendDataRes);
+      setEngagementData(funnelRes);
+      setKeywords(keywordsRes);
+      setSubreddits(subredditsRes);
+      setActivity(activityRes);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   if (loading) {

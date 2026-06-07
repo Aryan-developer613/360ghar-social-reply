@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_AGENT_RATE_LIMIT_SECONDS = 5.0
+_AGENT_RATE_LIMIT_SECONDS = 10.0
 
 
 @dataclass

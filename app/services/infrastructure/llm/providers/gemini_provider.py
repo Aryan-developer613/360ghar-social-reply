@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -15,11 +16,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_MAX_RETRIES = 5
+_INITIAL_BACKOFF = 2.0
+
 
 class GeminiProvider:
     """Gemini provider using the native REST API via httpx.
 
     Gemini's API is not OpenAI-compatible, so we use httpx directly.
+    Includes retry with exponential backoff for 429 rate-limit errors.
     """
 
     def __init__(self, api_key: str, model: str, api_url: str) -> None:
@@ -45,6 +50,37 @@ class GeminiProvider:
     def is_configured(self) -> bool:
         return bool(self._api_key)
 
+    def _request_with_retry(self, payload: dict[str, Any]) -> httpx.Response:
+        """POST to Gemini with retry on 429."""
+        url = f"{self._api_url}/models/{self._model}:generateContent"
+        headers = {"x-goog-api-key": self._api_key}
+
+        backoff = _INITIAL_BACKOFF
+        for attempt in range(1, _MAX_RETRIES + 1):
+            resp = httpx.post(url, json=payload, headers=headers, timeout=60)
+            if resp.status_code != 429:
+                resp.raise_for_status()
+                return resp
+
+            retry_after = resp.headers.get("retry-after")
+            if retry_after:
+                try:
+                    wait = float(retry_after)
+                except ValueError:
+                    wait = backoff
+            else:
+                wait = backoff
+
+            logger.warning(
+                "Gemini 429 rate-limited (attempt %d/%d), retrying in %.1fs",
+                attempt, _MAX_RETRIES, wait,
+            )
+            time.sleep(wait)
+            backoff = min(backoff * 2, 60)
+
+        resp.raise_for_status()
+        return resp
+
     def chat_json(
         self,
         messages: list[dict[str, str]],
@@ -53,7 +89,6 @@ class GeminiProvider:
     ) -> dict[str, Any] | list[Any] | None:
         try:
             prompt = self._format_messages(messages)
-            url = f"{self._api_url}/models/{self._model}:generateContent"
             payload = {
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                 "generationConfig": {
@@ -61,13 +96,7 @@ class GeminiProvider:
                     "responseMimeType": "application/json",
                 },
             }
-            resp = httpx.post(
-                url,
-                json=payload,
-                headers={"x-goog-api-key": self._api_key},
-                timeout=30,
-            )
-            resp.raise_for_status()
+            resp = self._request_with_retry(payload)
             data = resp.json()
             text = (
                 data.get("candidates", [{}])[0]
@@ -89,7 +118,6 @@ class GeminiProvider:
     ) -> str | None:
         try:
             prompt = self._format_messages(messages)
-            url = f"{self._api_url}/models/{self._model}:generateContent"
             payload = {
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                 "generationConfig": {
@@ -97,13 +125,7 @@ class GeminiProvider:
                     "maxOutputTokens": max_tokens,
                 },
             }
-            resp = httpx.post(
-                url,
-                json=payload,
-                headers={"x-goog-api-key": self._api_key},
-                timeout=30,
-            )
-            resp.raise_for_status()
+            resp = self._request_with_retry(payload)
             data = resp.json()
             return (
                 data.get("candidates", [{}])[0]

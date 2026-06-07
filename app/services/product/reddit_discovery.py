@@ -234,18 +234,66 @@ class RedditDiscoveryService:
         return deduped
 
     def list_subreddit_posts(self, subreddit: str, sort: str = "hot", limit: int = 10) -> list[RedditPost]:
-        """List posts directly from the public subreddit JSON feed."""
+        """List posts from a subreddit.
+
+        Tries the public JSON feed first; if Reddit blocks it (403), falls
+        back to the Atom/RSS feed which remains accessible.
+        """
         feed_sort = sort if sort in {"hot", "new", "top"} else "hot"
         params: dict[str, Any] = {"limit": min(limit, 100), "raw_json": 1}
         if feed_sort == "top":
             params["t"] = "month"
-        data = self._reddit_json(f"/r/{subreddit}/{feed_sort}.json", params=params, cache_ttl=_POST_CACHE_TTL)
+
+        # Try JSON first
+        try:
+            data = self._reddit_json(f"/r/{subreddit}/{feed_sort}.json", params=params, cache_ttl=_POST_CACHE_TTL)
+            posts: list[RedditPost] = []
+            for child in data.get("data", {}).get("children", []):
+                post = self._parse_post_payload(child.get("data", {}), subreddit)
+                if post and post.subreddit.lower() == subreddit.lower():
+                    posts.append(post)
+            if posts:
+                return posts[:limit]
+        except Exception as exc:
+            log.debug("JSON feed for r/%s failed (%s), trying RSS", subreddit, exc)
+
+        # Fall back to RSS
+        return self._list_subreddit_posts_rss(subreddit, sort=feed_sort, limit=limit)
+
+    def _list_subreddit_posts_rss(self, subreddit: str, *, sort: str, limit: int) -> list[RedditPost]:
+        """Fetch subreddit posts via the Atom/RSS feed (bypasses 403 on JSON)."""
+        rss_url = f"{self._reddit_base_url}/r/{subreddit}/{sort}.rss"
+        params: dict[str, Any] = {"limit": min(limit, 100)}
+        if sort == "top":
+            params["t"] = "month"
+
+        try:
+            resp = self._request("GET", rss_url, params=params)
+        except Exception as exc:
+            log.warning("RSS feed failed for r/%s: %s", subreddit, exc)
+            return []
+
+        import warnings
+
+        from bs4 import XMLParsedAsHTMLWarning  # noqa: F811
+
+        warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
         posts: list[RedditPost] = []
-        for child in data.get("data", {}).get("children", []):
-            post = self._parse_post_payload(child.get("data", {}), subreddit)
+        for entry in soup.find_all("entry"):
+            link_el = entry.find("link")
+            if not link_el:
+                continue
+            url = link_el.get("href", "")
+            if not url or "/comments/" not in url:
+                continue
+            post = self._fetch_post_from_rss(url)
             if post and post.subreddit.lower() == subreddit.lower():
                 posts.append(post)
-        return posts[:limit]
+            if len(posts) >= limit:
+                break
+        return posts
 
     def subreddit_about(self, subreddit: str) -> dict[str, Any]:
         """Fetch subreddit metadata from the public `about.json` endpoint."""
@@ -299,7 +347,10 @@ class RedditDiscoveryService:
                 subreddit_name = _subreddit_from_post_url(post_url)
                 if allowed_subreddits and (not subreddit_name or subreddit_name.lower() not in allowed_subreddits):
                     continue
+                # Try JSON hydration first, fall back to RSS
                 post = self._fetch_post_from_url(post_url)
+                if not post:
+                    post = self._fetch_post_from_rss(post_url)
                 if not post:
                     continue
                 posts_by_id[post.post_id] = post
@@ -338,11 +389,18 @@ class RedditDiscoveryService:
             }
             if sort == "top":
                 params["t"] = "month"
-            data = self._reddit_json(
-                f"/r/{subreddit}/{sort}.json",
-                params=params,
-                cache_ttl=_POST_CACHE_TTL,
-            )
+            try:
+                data = self._reddit_json(
+                    f"/r/{subreddit}/{sort}.json",
+                    params=params,
+                    cache_ttl=_POST_CACHE_TTL,
+                )
+            except Exception:
+                # JSON feed blocked — fall back to RSS for remaining posts
+                rss_posts = self._list_subreddit_posts_rss(subreddit, sort=sort, limit=remaining)
+                posts.extend(rss_posts)
+                break
+
             children = data.get("data", {}).get("children", [])
             if not children:
                 break
@@ -387,12 +445,26 @@ class RedditDiscoveryService:
         if cached is not None:
             return cached
 
+        results: list[SearchResult] = []
         if provider == "serpapi":
             results = self._search_serpapi(query, limit=limit)
         elif provider == "bing":
             results = self._search_bing(query, limit=limit)
         else:
-            results = self._search_duckduckgo(query, limit=limit)
+            try:
+                results = self._search_duckduckgo(query, limit=limit)
+            except Exception as exc:
+                log.debug("DuckDuckGo failed for %r: %s", query, exc)
+
+        # DuckDuckGo is often broken (JS SPA / connection reset). Always try
+        # Reddit's RSS search as a fallback when external search fails.
+        if not results:
+            try:
+                reddit_results = self._search_reddit_native(query, limit=limit)
+                if reddit_results:
+                    results = reddit_results
+            except Exception as exc:
+                log.debug("Reddit native search failed for %r: %s", query, exc)
 
         self._set_cached(cache_key, results, ttl=_SEARCH_RESULT_CACHE_TTL)
         return results
@@ -502,6 +574,152 @@ class RedditDiscoveryService:
             if len(results) >= limit:
                 break
         return results
+
+    def _search_reddit_native(self, query: str, *, limit: int) -> list[SearchResult]:
+        """Fall back to Reddit's public RSS search when external search fails.
+
+        Reddit blocks the JSON search API (403), but the Atom/RSS feed at
+        ``/search.rss`` still works with a descriptive User-Agent.
+        """
+        # Strip site: prefix if present — Reddit search doesn't need it
+        clean_query = query
+        for prefix in ("site:reddit.com ", "site:reddit.com"):
+            if clean_query.lower().startswith(prefix):
+                clean_query = clean_query[len(prefix):]
+                break
+        clean_query = clean_query.strip()
+        if not clean_query:
+            return []
+
+        try:
+            resp = self._request(
+                "GET",
+                f"{self._reddit_base_url}/search.rss",
+                params={
+                    "q": clean_query,
+                    "sort": "relevance",
+                    "t": "month",
+                    "limit": min(limit, 25),
+                },
+            )
+        except Exception as exc:
+            log.debug("Reddit RSS search failed for %r: %s", clean_query, exc)
+            return []
+
+        import warnings
+
+        from bs4 import XMLParsedAsHTMLWarning  # noqa: F811
+
+        warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        results: list[SearchResult] = []
+        for entry in soup.find_all("entry"):
+            title_el = entry.find("title")
+            link_el = entry.find("link")
+            if not link_el:
+                continue
+            url = link_el.get("href", "")
+            if not url:
+                continue
+            # Skip subreddit listing pages (only want comment/post links)
+            if "/comments/" not in url:
+                continue
+            results.append(
+                SearchResult(
+                    url=url,
+                    title=title_el.text.strip() if title_el else "",
+                    snippet="",
+                )
+            )
+            if len(results) >= limit:
+                break
+        return results
+
+    def _fetch_post_from_rss(self, post_url: str) -> RedditPost | None:
+        """Hydrate a single Reddit post via its Atom/RSS feed.
+
+        Reddit blocks the ``.json`` endpoint for unauthenticated clients,
+        but ``{permalink}/.rss`` still returns the post content.
+        """
+        rss_url = post_url.rstrip("/") + "/.rss"
+        try:
+            resp = self._request("GET", rss_url)
+        except Exception as exc:
+            log.debug("Reddit RSS hydration failed for %s: %s", post_url, exc)
+            return None
+
+        import html
+        import warnings
+
+        from bs4 import XMLParsedAsHTMLWarning  # noqa: F811
+
+        warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        entries = soup.find_all("entry")
+        if not entries:
+            return None
+
+        # First entry is the post itself; subsequent entries are comments
+        post_entry = entries[0]
+        title = post_entry.find("title")
+        title_text = title.text.strip() if title else ""
+
+        # Parse permalink for post_id and subreddit
+        normalized = _normalize_reddit_post_url(post_url)
+        if not normalized:
+            return None
+        path_segments = [s for s in urlsplit(normalized).path.split("/") if s]
+        if len(path_segments) < 4:
+            return None
+        subreddit = path_segments[1]
+        post_id = path_segments[3]
+
+        # Extract body from content (HTML-escaped in RSS)
+        content_el = post_entry.find("content")
+        body = ""
+        if content_el:
+            # RSS wraps content in HTML entities — unescape first
+            raw = html.unescape(content_el.decode_contents())
+            body_soup = BeautifulSoup(raw, "html.parser")
+            body = body_soup.get_text(" ", strip=True)
+            # Strip common prefixes from self-posts
+            for prefix in ("<!-- SC_OFF -->", "<!-- SC_ON -->"):
+                body = body.replace(prefix, "").strip()
+
+        # Extract author
+        author_el = post_entry.find("author")
+        author_name = ""
+        if author_el:
+            name_el = author_el.find("name")
+            author_name = name_el.text.removeprefix("/u/").strip() if name_el else ""
+
+        # Try to get score from the XML (sometimes present as <media:statistics>)
+        score = 0
+        stats = post_entry.find("media:statistics")
+        if stats:
+            score = int(stats.get("views", 0))
+
+        # Parse updated time as created_at
+        import contextlib
+
+        updated_el = post_entry.find("updated")
+        created_at = datetime.now(UTC)
+        if updated_el and updated_el.text:
+            with contextlib.suppress(ValueError, TypeError):
+                created_at = datetime.fromisoformat(updated_el.text.replace("Z", "+00:00"))
+
+        return RedditPost(
+            post_id=post_id,
+            subreddit=subreddit,
+            title=title_text,
+            author=author_name or "[unknown]",
+            permalink=normalized,
+            body=body,
+            created_at=created_at,
+            num_comments=len(entries) - 1,
+            score=score,
+        )
 
     def _request_json(
         self,

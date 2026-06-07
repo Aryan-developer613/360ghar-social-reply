@@ -376,6 +376,10 @@ def _prepare_opportunity_payload(db: Client, payload: dict[str, Any]) -> dict[st
         if _opportunity_supports_column(db, "subreddit_name"):
             prepared["subreddit_name"] = subreddit_value
 
+    # Ensure reddit_post_id is set for non-Reddit agents to avoid NOT NULL violations
+    if "reddit_post_id" not in prepared or prepared["reddit_post_id"] is None:
+        prepared.setdefault("reddit_post_id", None)
+
     return {
         key: value
         for key, value in prepared.items()

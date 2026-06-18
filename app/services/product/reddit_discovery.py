@@ -70,9 +70,6 @@ class SearchResult:
 class RedditDiscoveryService:
     """Discover Reddit posts and subreddit metadata without Reddit OAuth."""
 
-    # Class-level flag: once DDG fails once, skip it for all future instances
-    _ddg_disabled: bool = False
-
     def __init__(self) -> None:
         settings = get_settings()
         self._settings = settings
@@ -466,9 +463,6 @@ class RedditDiscoveryService:
                 results = self._search_duckduckgo(query, limit=limit)
             except Exception as exc:
                 log.debug("DuckDuckGo failed for %r: %s", query, exc)
-                # Disable DDG for all future calls in this process
-                RedditDiscoveryService._ddg_disabled = True
-                log.info("DuckDuckGo disabled for remaining searches in this process")
 
         # DuckDuckGo is often broken (JS SPA / connection reset). Always try
         # Reddit's RSS search as a fallback when external search fails.
@@ -490,9 +484,6 @@ class RedditDiscoveryService:
             return "serpapi"
         if self._bing_search_api_key:
             return "bing"
-        # If DDG has failed before, skip it entirely
-        if self._ddg_disabled:
-            return "reddit"
         return "duckduckgo"
 
     def _search_serpapi(self, query: str, *, limit: int) -> list[SearchResult]:
@@ -554,42 +545,57 @@ class RedditDiscoveryService:
         soup = BeautifulSoup(html, "html.parser")
         results: list[SearchResult] = []
 
-        for result in soup.select(".result"):
-            link = result.select_one("a.result__a")
-            if link is None:
+        # Try multiple CSS selector patterns — DDG changes markup often
+        selectors = [
+            (".result", "a.result__a", ".result__snippet"),
+            (".web-result", "h2 a[href]", ".result__snippet"),
+            (".results article", "h2 a[href]", "p"),
+            ("article[data-testid='result']", "a[href]", "span"),
+        ]
+        used_fallback = False
+        for container_sel, link_sel, snippet_sel in selectors:
+            containers = soup.select(container_sel)
+            if not containers:
                 continue
-            href = _resolve_search_result_url(link.get("href", ""))
-            if not href:
-                continue
-            snippet_node = result.select_one(".result__snippet")
-            results.append(
-                SearchResult(
-                    url=href,
-                    title=link.get_text(" ", strip=True),
-                    snippet=snippet_node.get_text(" ", strip=True) if snippet_node else "",
+            for container in containers:
+                link = container.select_one(link_sel) if link_sel else container
+                if link is None:
+                    continue
+                href = _resolve_search_result_url(link.get("href", ""))
+                if not href:
+                    continue
+                snippet_node = container.select_one(snippet_sel) if snippet_sel else None
+                results.append(
+                    SearchResult(
+                        url=href,
+                        title=link.get_text(" ", strip=True),
+                        snippet=snippet_node.get_text(" ", strip=True) if snippet_node else "",
+                    )
                 )
-            )
-            if len(results) >= limit:
+                if len(results) >= limit:
+                    break
+            if results:
                 break
+            used_fallback = container_sel != selectors[0][0]
 
         if results:
             return results
 
-        # DuckDuckGo occasionally changes the result markup. Fall back to a
-        # looser anchor scan instead of treating it as a hard failure.
-        for link in soup.select("a[href]"):
-            href = _resolve_search_result_url(link.get("href", ""))
-            if not href:
-                continue
-            results.append(
-                SearchResult(
-                    url=href,
-                    title=link.get_text(" ", strip=True),
-                    snippet="",
+        if not used_fallback:
+            # Looser anchor scan as last resort
+            for link in soup.select("a[href]"):
+                href = _resolve_search_result_url(link.get("href", ""))
+                if not href:
+                    continue
+                results.append(
+                    SearchResult(
+                        url=href,
+                        title=link.get_text(" ", strip=True),
+                        snippet="",
+                    )
                 )
-            )
-            if len(results) >= limit:
-                break
+                if len(results) >= limit:
+                    break
         return results
 
     def _search_reddit_native(self, query: str, *, limit: int) -> list[SearchResult]:

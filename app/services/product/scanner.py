@@ -461,6 +461,7 @@ def _hydrate_scan_run_response(
     hydrated = dict(record)
     hydrated.setdefault("search_window_hours", search_window_hours)
     hydrated.setdefault("posts_scanned", posts_scanned)
+    hydrated.setdefault("opportunities_found", 0)
     if completed_at and not hydrated.get("completed_at"):
         hydrated["completed_at"] = completed_at
     return hydrated

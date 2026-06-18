@@ -53,8 +53,17 @@ async def lifespan(app: FastAPI):
             "No LLM provider is configured. Set GEMINI_API_KEY in the repo root .env.local, "
             "or configure another provider and restart the backend."
         )
-    # Note: Table creation is now managed via Supabase dashboard/migrations
-    # Base.metadata.create_all(bind=engine) is no longer used
+    # Run pending schema migrations
+    try:
+        from app.db.run_migrations import run_migrations
+
+        applied = run_migrations()
+        if applied:
+            logger.info("Applied %d migration(s): %s", len(applied), ", ".join(applied))
+        else:
+            logger.info("No pending migrations.")
+    except Exception:
+        logger.exception("Migration runner failed — continuing startup")
     logger.info("RedditFlow API started successfully.")
     yield
     logger.info("Shutting down RedditFlow API.")

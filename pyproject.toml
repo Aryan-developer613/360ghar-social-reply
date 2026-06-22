@@ -1,0 +1,65 @@
+[project]
+name = "redditflow"
+version = "0.1.0"
+description = "RedditFlow backend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.8.0",
+  "pydantic-ai-slim[openai,google]>=1.0.0",
+  "pydantic-settings>=2.4.0",
+  "sqlalchemy>=2.0.31",
+  "psycopg2-binary>=2.9.9",
+  "openai>=1.35.0",
+  "httpx>=0.27.0",
+  "beautifulsoup4>=4.12.3",
+  "PyJWT>=2.9.0",
+  "cryptography>=43.0.1",
+  "email-validator>=2.2.0",
+  "python-dotenv>=1.0.1",
+  "supabase>=2.15.0",
+  "scikit-learn>=1.5.0",
+  "numpy>=1.26.0",
+  "sentence-transformers>=5.5.1",
+  "praw>=8.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+  "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "exports*", "sessions*"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "tests"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "TCH"]
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Path"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[dependency-groups]
+dev = [
+    "nplusone==1.0.0",
+]

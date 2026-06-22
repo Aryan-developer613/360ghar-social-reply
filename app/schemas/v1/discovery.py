@@ -106,7 +106,7 @@ class OpportunityResponse(BaseModel):
 
     id: int
     project_id: int
-    scan_run_id: str | None
+    scan_run_id: int | str | None
     reddit_post_id: str | None = None
     subreddit_name: str | None = None
     author: str | None = None
@@ -120,7 +120,7 @@ class OpportunityResponse(BaseModel):
     rule_risk: list[str]
     created_at: datetime
     updated_at: datetime
-    posted_at: datetime | None
+    posted_at: datetime | None = None
     # Multi-agent platform fields
     platform: str = "reddit"
     agent_name: str | None = None

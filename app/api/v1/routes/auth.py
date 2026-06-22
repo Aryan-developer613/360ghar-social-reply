@@ -16,15 +16,13 @@ from supabase import Client
 from app.api.v1.deps import (
     _is_token_revoked,
     bearer_scheme,
-    ensure_default_prompts,
+    ensure_default_project,
     get_current_user,
     workspace_summary,
 )
 from app.db.supabase_client import get_supabase
 from app.db.tables import (
-    create_brand_profile,
     create_membership,
-    create_project,
     create_user,
     create_workspace,
     get_user_by_email,
@@ -96,53 +94,6 @@ def _provision_workspace(supabase: Client, user: dict, workspace_name: str) -> d
 
     return workspace
 
-
-def ensure_default_project(supabase: Client, workspace: dict) -> dict:
-    """Ensure a default project exists for the workspace."""
-    from app.db.tables.projects import list_projects_for_workspace
-
-    projects = list_projects_for_workspace(supabase, workspace["id"])
-    if projects:
-        return projects[0]
-
-    base_name = (workspace.get("name") or "").strip() or "Default"
-    if not base_name.lower().endswith("project"):
-        base_name = f"{base_name} Project"
-
-    slug = unique_slug(supabase, "projects", base_name, "workspace_id", workspace["id"])
-
-    project = create_project(
-        supabase,
-        {
-            "workspace_id": workspace["id"],
-            "name": base_name,
-            "slug": slug,
-            "status": "active",
-            "description": None,
-        },
-    )
-
-    # Create brand profile
-    create_brand_profile(
-        supabase,
-        {
-            "project_id": project["id"],
-            "brand_name": project["name"],
-            "summary": None,
-            "voice_notes": None,
-            "product_summary": None,
-            "target_audience": None,
-            "call_to_action": None,
-            "business_domain": None,
-            "linkedin_url": None,
-            "website_url": None,
-        },
-    )
-
-    # Ensure default prompts
-    ensure_default_prompts(supabase, project["id"])
-
-    return project
 
 
 @router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

@@ -8,6 +8,7 @@ import { type Project, apiRequest, isAuthError } from "@/lib/api";
 import { getErrorMessage } from "@/types/errors";
 import { setStoredProjectId, withProjectId } from "@/lib/project";
 import { useSelectedProjectId } from "@/hooks/use-selected-project";
+import { useProjectStore } from "@/stores/project-store";
 
 import { useAuth } from "@/components/auth/auth-provider";
 import { supabase } from "@/lib/supabase";
@@ -181,6 +182,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [notifCount, setNotifCount] = useState(0);
   const selectedProjectId = useSelectedProjectId();
+  const hasAutoSelected = useRef(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   // Separate state for desktop and mobile notification popovers to avoid conflicts
@@ -245,9 +247,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (!projects.length) {
       return;
     }
-    if (selectedProjectId && projects.some((project) => project.id === selectedProjectId)) {
+    // Only auto-select when there is no selectedProjectId (null/undefined).
+    // If a valid ID is set but not yet in the list, the project may still be loading.
+    // The ref prevents this effect from re-triggering loadShell more than once.
+    if (selectedProjectId != null) {
       return;
     }
+    if (hasAutoSelected.current) {
+      return;
+    }
+    hasAutoSelected.current = true;
     const nextProjectId = projects[0].id;
     setStoredProjectId(nextProjectId);
   }, [dash?.projects, selectedProjectId]);
@@ -266,6 +275,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       if (dashRes.status === "fulfilled") {
         setDash(dashRes.value);
+        if (dashRes.value.projects) {
+          useProjectStore.getState().setProjects(dashRes.value.projects);
+        }
       }
       if (notifRes.status === "fulfilled") {
         setNotifCount(notifRes.value.unread_count || 0);

@@ -6,7 +6,6 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Qu
 from supabase import Client
 
 from app.api.v1.deps import (
-    ensure_default_project,
     ensure_workspace_membership,
     get_active_project,
     get_current_user,
@@ -74,7 +73,9 @@ def start_auto_pipeline(
 
     _ensure_llm_ready()
 
-    proj = get_active_project(supabase, workspace["id"], project_id) or ensure_default_project(supabase, workspace)
+    proj = get_active_project(supabase, workspace["id"], project_id)
+    if not proj:
+        raise HTTPException(404, "No active project found. Please create a project first.")
 
     pipeline = create_auto_pipeline(
         supabase,
@@ -217,7 +218,9 @@ def list_auto_pipelines(
 ):
     """List all pipeline runs."""
     ensure_workspace_membership(supabase, workspace["id"], current_user["id"])
-    proj = get_active_project(supabase, workspace["id"], project_id) or ensure_default_project(supabase, workspace)
+    proj = get_active_project(supabase, workspace["id"], project_id)
+    if not proj:
+        raise HTTPException(404, "No active project found. Please create a project first.")
 
     pipelines = list_auto_pipelines_for_project(supabase, proj["id"], limit=limit, offset=offset)
 

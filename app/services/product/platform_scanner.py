@@ -161,8 +161,12 @@ def run_platform_scan(
         return {"error": str(e), "opportunities_found": 0}
 
     # Score and filter posts
+    # Non-Reddit posts (tweets, LinkedIn) are shorter and naturally score
+    # lower than long Reddit threads.  Use a relaxed threshold so they
+    # aren't all filtered out.
+    effective_threshold = max(5, min_score - 10)
     engine = RelevanceEngine(
-        relevance_threshold=min_score,
+        relevance_threshold=effective_threshold,
         semantic_threshold=0.0,
     )
     engine_brand = _engine_brand_profile(brand)
@@ -192,13 +196,34 @@ def run_platform_scan(
             source_rules=[],
         )
 
+        logger.info(
+            "[%s] Post '%s' scored %d, keep=%s, reason=%s",
+            post.platform,
+            (post.title or post.body)[:50],
+            relevance.relevance_score,
+            relevance.should_keep,
+            relevance.rejection_reason,
+        )
+
         if not relevance.should_keep:
-            continue
+            # Rescue borderline posts that have keyword matches — give
+            # them a chance to be reviewed manually instead of being
+            # silently dropped.
+            if relevance.relevance_score >= 10 and relevance.matched_keywords:
+                logger.info(
+                    "[%s] Rescuing borderline post (score=%d, kw=%s) as 'review'",
+                    post.platform,
+                    relevance.relevance_score,
+                    relevance.matched_keywords[:3],
+                )
+            else:
+                continue
 
         score_payload = _result_payload(relevance)
 
-        # All platform opportunities get status "new" so drafts are generated
-        opp_status = "new"
+        # Posts that passed the threshold get "new"; rescued borderline posts
+        # that only survived the keyword-match rescue get "review".
+        opp_status = "new" if relevance.should_keep else "review"
         opp_data = {
             "project_id": project["id"],
             "platform": post.platform,

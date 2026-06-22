@@ -73,6 +73,10 @@ export function useDiscoveryData(token: string | null | undefined, selectedProje
         dashRes.projects?.find((item) => item.id === selectedProjectId) ?? dashRes.projects?.[0] ?? null;
       setProject(currentProject);
       if (!currentProject) {
+        // No project found — clear loading flags so the UI can render
+        // a "no project" empty state instead of an eternal spinner.
+        setLoading(false);
+        setInitialLoading(false);
         return;
       }
 

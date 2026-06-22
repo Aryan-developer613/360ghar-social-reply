@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, Query, status
 from supabase import Client
 
 from app.api.v1.deps import (
-    ensure_default_project,
     ensure_workspace_membership,
     get_active_project,
     get_current_user,
@@ -81,7 +80,6 @@ def dashboard(
     supabase: Client = Depends(get_supabase),
 ) -> DashboardResponse:
     ensure_workspace_membership(supabase, workspace["id"], current_user["id"])
-    ensure_default_project(supabase, workspace)
 
     projects = list_projects_for_workspace(supabase, workspace["id"])
     selected_project = get_active_project(supabase, workspace["id"], project_id)

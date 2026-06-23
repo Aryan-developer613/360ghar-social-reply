@@ -57,6 +57,9 @@ class GeminiProvider:
 
         backoff = _INITIAL_BACKOFF
         for attempt in range(1, _MAX_RETRIES + 1):
+            # Globally throttle ALL Gemini requests to 1 request per 4.1 seconds (approx 14.6 requests/minute)
+            # This completely avoids bursting the strict 15 RPM Free Tier limit.
+            time.sleep(4.1)
             resp = httpx.post(url, json=payload, headers=headers, timeout=60)
             if resp.status_code != 429:
                 resp.raise_for_status()

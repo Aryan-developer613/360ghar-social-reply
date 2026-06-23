@@ -64,22 +64,10 @@ class GeminiProvider:
             if resp.status_code != 429:
                 resp.raise_for_status()
                 return resp
-
-            retry_after = resp.headers.get("retry-after")
-            if retry_after:
-                try:
-                    wait = float(retry_after)
-                except ValueError:
-                    wait = backoff
-            else:
-                wait = backoff
-
-            logger.warning(
-                "Gemini 429 rate-limited (attempt %d/%d), retrying in %.1fs",
-                attempt, _MAX_RETRIES, wait,
-            )
-            time.sleep(wait)
-            backoff = min(backoff * 2, 60)
+            
+            # Since we globally throttle to <15 RPM, any 429 here means the DAILY quota is exhausted.
+            # Retrying will just hang the pipeline for minutes. Fail fast.
+            resp.raise_for_status()
 
         resp.raise_for_status()
         return resp

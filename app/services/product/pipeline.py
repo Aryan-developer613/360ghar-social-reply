@@ -413,8 +413,14 @@ def run_auto_pipeline_background(
                 })
                 update_opportunity(db, opp["id"], {"status": "drafting"})
                 drafts_count += 1
+                
+                # Throttle requests to respect Gemini Free Tier limits (15 RPM)
+                import time
+                time.sleep(5)
             except Exception as e:
                 log.warning("Draft generation failed for opp %s: %s", opp["id"], e)
+                import time
+                time.sleep(5)
 
         update_auto_pipeline(db, pipeline_id, {"drafts_generated": drafts_count, "progress": 95})
         log.info("Generated %d drafts for %d opportunities", drafts_count, len(opportunities))

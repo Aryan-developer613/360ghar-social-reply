@@ -399,7 +399,7 @@ def run_auto_pipeline_background(
                     if not is_valid:
                         update_opportunity(db, opp["id"], {"status": "ignored"})
                         continue
-                content, rationale, _source_prompt = copilot.generate_reply(
+                content, rationale, _source_prompt, metadata = copilot.generate_reply(
                     opp, brand_dict, prompts,
                     platform=opp.get("platform"),
                 )
@@ -408,6 +408,8 @@ def run_auto_pipeline_background(
                     "opportunity_id": opp["id"],
                     "content": content,
                     "rationale": rationale,
+                    "citations": metadata.get("citations", []),
+                    "automation_eligibility": metadata.get("automation_eligibility", False)
                 })
                 update_opportunity(db, opp["id"], {"status": "drafting"})
                 drafts_count += 1

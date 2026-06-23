@@ -124,7 +124,7 @@ def generate_reply_draft(
 
         # Save all variants as drafts, return the first one
         first_draft = None
-        for i, (content, rationale, source_prompt) in enumerate(variants):
+        for i, (content, rationale, source_prompt, metadata) in enumerate(variants):
             draft = create_reply_draft(
                 supabase,
                 {
@@ -134,6 +134,8 @@ def generate_reply_draft(
                     "rationale": rationale,
                     "source_prompt": source_prompt,
                     "version": i + 1,
+                    "citations": metadata.get("citations", []),
+                    "automation_eligibility": metadata.get("automation_eligibility", False)
                 },
             )
             if first_draft is None:
@@ -143,7 +145,7 @@ def generate_reply_draft(
         return ReplyDraftResponse.model_validate(first_draft)
 
     # Single reply (default path — unchanged behavior)
-    content, rationale, source_prompt = generate_reply(
+    content, rationale, source_prompt, metadata = generate_reply(
         opportunity,
         project.get("brand_profile"),
         prompts,
@@ -161,6 +163,8 @@ def generate_reply_draft(
             "rationale": rationale,
             "source_prompt": source_prompt,
             "version": 1,
+            "citations": metadata.get("citations", []),
+            "automation_eligibility": metadata.get("automation_eligibility", False)
         },
     )
 

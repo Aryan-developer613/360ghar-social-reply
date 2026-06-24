@@ -171,7 +171,29 @@ class RedditAdapter(PlatformAdapter):
         For subreddit-targeted search, use `get_subreddit_posts()` instead.
         """
         if not self._available:
-            return []
+            logger.info("RapidAPI unavailable. Falling back to RedditDiscoveryService search_posts")
+            from app.services.product.reddit_discovery import RedditDiscoveryService
+            import asyncio
+            
+            discovery = RedditDiscoveryService()
+            try:
+                legacy_posts = await asyncio.to_thread(discovery.search_posts, keywords=keywords, limit=limit)
+                return [
+                    UnifiedPost(
+                        platform="reddit",
+                        external_id=rp.post_id,
+                        author=rp.author,
+                        title=rp.title,
+                        body=rp.body,
+                        url=rp.permalink,
+                        subreddit=rp.subreddit,
+                        upvotes=1,
+                        raw_data={"fallback": True}
+                    ) for rp in legacy_posts
+                ]
+            except Exception as e:
+                logger.warning("RedditDiscoveryService fallback failed: %s", e)
+                return []
 
         try:
             data = await self.client.get(
@@ -210,7 +232,40 @@ class RedditAdapter(PlatformAdapter):
         generic ``search_posts`` (which only calls ``getPopularPosts``).
         """
         if not self._available:
-            return []
+            logger.info("RapidAPI unavailable. Falling back to RedditDiscoveryService search_and_enrich")
+            from app.services.product.reddit_discovery import RedditDiscoveryService
+            import asyncio
+            
+            discovery = RedditDiscoveryService()
+            all_posts: list[UnifiedPost] = []
+            
+            try:
+                # search_posts has a robust fallback chain (JSON -> RSS -> DuckDuckGo)
+                # It handles subreddit filtering natively.
+                legacy_posts = await asyncio.to_thread(
+                    discovery.search_posts, 
+                    keywords=keywords, 
+                    subreddits=self._subreddits if self._subreddits else None,
+                    limit=limit
+                )
+                for rp in legacy_posts:
+                    all_posts.append(
+                        UnifiedPost(
+                            platform="reddit",
+                            external_id=rp.post_id,
+                            author=rp.author,
+                            title=rp.title,
+                            body=rp.body,
+                            url=rp.permalink,
+                            subreddit=rp.subreddit,
+                            upvotes=1,
+                            raw_data={"fallback": True}
+                        )
+                    )
+            except Exception as e:
+                logger.warning("[reddit_fallback] Failed to search: %s", e)
+            
+            return all_posts
 
         if not self._subreddits:
             # Fallback: no subreddits configured → use base behaviour

@@ -96,6 +96,7 @@ const NAV_SECTIONS = [
     items: [
       { href: "/app/company", label: "Company Setup", icon: UserCircle },
       { href: "/app/brand-brain", label: "Brand Brain", icon: Palette },
+      { href: "/app/competitors", label: "Competitors", icon: Users },
       { href: "/app/sources", label: "Sources", icon: Search },
     ],
   },

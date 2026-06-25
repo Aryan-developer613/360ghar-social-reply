@@ -9,11 +9,18 @@
 
 providers = ["python"]
 
-# Nixpacks auto-generates an install phase for uv projects that runs
-# `pip install uv==$NIXPACKS_UV_VERSION`. In Nixpacks v1.41.0 this variable is
-# left empty, producing the invalid `pip install uv==` requirement that breaks
-# the build before railway.toml's buildCommand can run. Pinning it explicitly
-# populates the variable and fixes the install phase. Keep this in sync with the
-# local uv used to regenerate uv.lock.
-[variables]
-NIXPACKS_UV_VERSION = "0.9.17"
+# Nixpacks' auto-generated uv install phase runs
+#   `pip install uv==$NIXPACKS_UV_VERSION && uv sync --no-dev --frozen`
+# but in Nixpacks v1.41.0 `$NIXPACKS_UV_VERSION` resolves to an empty string
+# (a known bug), producing the invalid `pip install uv==` requirement that
+# fails the build before railway.toml's buildCommand can run.
+#
+# We fix this by OVERRIDING the install phase with an explicit, working
+# command. Per Nixpacks docs, `cmds` WITHOUT the "..." sentinel fully
+# replaces the provider's default commands for the phase — so the broken
+# `pip install uv==` is never emitted. The uv version is pinned to 0.9.17
+# (the local uv that generated uv.lock). A `.tool-versions` file is also
+# committed as a backup so the variable resolves even if a future Nixpacks
+# version changes the override/merge semantics.
+[phases.install]
+cmds = ["python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install uv==0.9.17 && uv sync --no-dev --frozen"]

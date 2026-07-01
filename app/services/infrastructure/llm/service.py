@@ -123,7 +123,7 @@ def analyze_brand(text: str, fallback_name: str = "", cache_ttl: float = 300.0) 
     return _run_async(analyze_brand_async(text, fallback_name, cache_ttl))
 
 
-async def generate_reply_async(opportunity: dict, brand: dict | None, prompts: list[dict], cache_ttl: float = 0.0) -> tuple[str, str, str] | None:
+async def generate_reply_async(opportunity: dict, brand: dict | None, prompts: list[dict], cache_ttl: float = 0.0, model_override: str | None = None) -> tuple[str, str, str] | None:
     brand_deps = BrandDeps.from_brand_dict(brand)
     prompt_context = "\n".join(f"{p.get('name', '')}: {p.get('instructions', '')}" for p in prompts if p.get("prompt_type") == "reply")
     deps = ReplyDeps(opportunity_title=opportunity.get("title", ""), opportunity_body=opportunity.get("body_excerpt", ""), subreddit=opportunity.get("subreddit", ""), score_reasons=opportunity.get("score_reasons", []), brand=brand_deps, prompt_context=prompt_context)
@@ -132,7 +132,7 @@ async def generate_reply_async(opportunity: dict, brand: dict | None, prompts: l
     cached = get_cached("reply_generator", user_content, deps)
     if cached is not None:
         return cached.content, cached.rationale, prompt_context
-    model = _build_model()
+    model = _build_model(model_override=model_override)
     model_name = getattr(model, "model_name", "unknown")
     provider = get_settings().llm_provider.lower()
     timer = CallTimer("reply_generator", provider, str(model_name))
@@ -151,8 +151,8 @@ async def generate_reply_async(opportunity: dict, brand: dict | None, prompts: l
             return None
 
 
-def generate_reply_sync(opportunity: dict, brand: dict | None, prompts: list[dict]) -> tuple[str, str, str] | None:
-    return _run_async(generate_reply_async(opportunity, brand, prompts))
+def generate_reply_sync(opportunity: dict, brand: dict | None, prompts: list[dict], model_override: str | None = None) -> tuple[str, str, str] | None:
+    return _run_async(generate_reply_async(opportunity, brand, prompts, model_override=model_override))
 
 
 async def generate_post_async(brand: dict | None, prompts: list[dict], cache_ttl: float = 0.0) -> tuple[str, str, str] | None:
@@ -193,11 +193,24 @@ class LLMService:
     to allow the dev/test TemplateProvider fallback.
     """
 
-    def __init__(self, provider_name: str | None = None) -> None:
+    def __init__(self, provider_name: str | None = None, model_override: str | None = None) -> None:
         settings = get_settings()
         allow_fallback = str(os.environ.get("LLM_ALLOW_TEMPLATE_FALLBACK", "")).lower() in ("1", "true", "yes")
         try:
+            if model_override and model_override != "default":
+                if "claude" in model_override.lower():
+                    provider_name = "claude"
+                elif "gpt" in model_override.lower() or "o1" in model_override.lower():
+                    provider_name = "openai"
+                elif "gemini" in model_override.lower():
+                    provider_name = "gemini"
+                else:
+                    provider_name = "openai"
+                    model_override = settings.openai_model
+                    
             self._provider = get_provider(provider_name)
+            if model_override and hasattr(self._provider, '_model'):
+                self._provider._model = model_override
             self._is_template = False
         except ValueError as exc:
             if not allow_fallback:
@@ -226,22 +239,58 @@ class LLMService:
         """True only if a real (non-template) LLM provider is configured."""
         return not self._is_template and self.is_enabled
 
+    def _get_fallback_providers(self) -> list:
+        """Return other configured providers to try if the primary one fails."""
+        try:
+            all_providers = get_configured_providers()
+            fallbacks = [
+                p for name, p in all_providers.items()
+                if name != self._provider.name
+            ]
+            if self._provider.name != "template":
+                from app.services.infrastructure.llm.providers.template_provider import TemplateProvider
+                fallbacks.append(TemplateProvider())
+            return fallbacks
+        except Exception:
+            return []
+
     def call_json(
         self,
         system_prompt: str,
         user_content: str,
         temperature: float = 0.2,
     ) -> dict[str, Any] | list[Any] | None:
-        """Call LLM and return parsed JSON. Drop-in replacement for LLMClient.call()."""
+        """Call LLM and return parsed JSON. Drop-in replacement for LLMClient.call().
+
+        When the primary provider returns None or raises, automatically tries
+        other configured providers before giving up. This handles the common
+        case where Gemini is 429-rate-limited but OpenRouter is available.
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        # Try primary provider
         try:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ]
-            return self._provider.chat_json(messages, temperature=temperature)
+            result = self._provider.chat_json(messages, temperature=temperature)
+            if result is not None:
+                return result
+            logger.warning("Primary LLM provider %s returned None for call_json", self._provider.name)
         except Exception:
-            logger.exception("LLM call_json failed via %s", self._provider.name)
-            return None
+            logger.exception("LLM call_json failed via primary provider %s", self._provider.name)
+
+        # Primary failed or returned None — try fallback providers
+        for fallback in self._get_fallback_providers():
+            try:
+                logger.info("Trying fallback LLM provider %s for call_json", fallback.name)
+                result = fallback.chat_json(messages, temperature=temperature)
+                if result is not None:
+                    logger.info("Fallback provider %s succeeded for call_json", fallback.name)
+                    return result
+            except Exception:
+                logger.warning("Fallback provider %s also failed for call_json", fallback.name)
+
+        return None
 
     def call_text(
         self,
@@ -250,18 +299,41 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int = 2048,
     ) -> str | None:
-        """Call LLM and return raw text response."""
+        """Call LLM and return raw text response.
+
+        When the primary provider returns None or raises, automatically tries
+        other configured providers before giving up.
+        """
+        messages: list[dict[str, str]] = []
+        if system_message:
+            messages.append({"role": "system", "content": system_message})
+        messages.append({"role": "user", "content": prompt})
+
+        # Try primary provider
         try:
-            messages: list[dict[str, str]] = []
-            if system_message:
-                messages.append({"role": "system", "content": system_message})
-            messages.append({"role": "user", "content": prompt})
-            return self._provider.chat_text(
+            result = self._provider.chat_text(
                 messages, temperature=temperature, max_tokens=max_tokens
             )
+            if result is not None:
+                return result
+            logger.warning("Primary LLM provider %s returned None for call_text", self._provider.name)
         except Exception:
-            logger.exception("LLM call_text failed via %s", self._provider.name)
-            return None
+            logger.exception("LLM call_text failed via primary provider %s", self._provider.name)
+
+        # Primary failed or returned None — try fallback providers
+        for fallback in self._get_fallback_providers():
+            try:
+                logger.info("Trying fallback LLM provider %s for call_text", fallback.name)
+                result = fallback.chat_text(
+                    messages, temperature=temperature, max_tokens=max_tokens
+                )
+                if result is not None:
+                    logger.info("Fallback provider %s succeeded for call_text", fallback.name)
+                    return result
+            except Exception:
+                logger.warning("Fallback provider %s also failed for call_text", fallback.name)
+
+        return None
 
 
 class VisibilityRunner:

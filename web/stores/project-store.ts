@@ -25,7 +25,11 @@ export const useProjectStore = create<ProjectState>((set) => ({
       if (currentId && projects.some((p) => p.id === currentId)) {
         return { projects };
       }
-      return { projects, selectedProjectId: projects[0]?.id ?? null };
+      const nextId = projects[0]?.id ?? null;
+      if (nextId !== null) {
+        setStoredProjectId(nextId);
+      }
+      return { projects, selectedProjectId: nextId };
     });
   },
 

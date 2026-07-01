@@ -86,6 +86,14 @@ def generate_reply_draft(
     ensure_default_prompts(supabase, project["id"])
     prompts = list_prompt_templates_for_project(supabase, project["id"])
 
+    # NOTE: project.get("brand_profile") was a bug — projects rows never had
+    # that key, so AI-generated reply drafts have been produced with zero
+    # brand context (no brand name, tone, audience, or pain points) on every
+    # call site except the old pipeline.py auto-pipeline, which manually
+    # worked around this by hydrating the dict itself. Resolve once here.
+    from app.db.tables.projects import resolve_brand_context
+    brand_context = resolve_brand_context(supabase, workspace["id"], project["id"])
+
     # Resolve the voice profile: explicit request > project default > none.
     voice_profile = None
     if payload.voice_profile_id is not None:
@@ -106,18 +114,38 @@ def generate_reply_draft(
     # Resolve effective platform: explicit override > opportunity's platform > "reddit"
     effective_platform = payload.platform or opportunity.get("platform") or "reddit"
 
+    # Fetch user memories via similarity search and inject them into prompts
+    try:
+        from app.services.infrastructure.embeddings.service import EmbeddingService
+        from app.db.tables.memories import search_memories
+        
+        embed_service = EmbeddingService()
+        opp_text = f"{opportunity.get('title', '')} {opportunity.get('body_excerpt', '')}"
+        query_embedding = embed_service.embed(opp_text)
+        memories = search_memories(supabase, project["workspace_id"], query_embedding, match_threshold=0.3, match_count=3)
+        if memories:
+            memory_texts = "\n- ".join([m["content"] for m in memories])
+            prompts.append({
+                "prompt_type": "reply",
+                "name": "User Memories",
+                "instructions": f"Follow these previous feedback rules:\n- {memory_texts}"
+            })
+    except Exception as e:
+        logger.warning("Failed to fetch memories: %s", e)
+
     if payload.variants > 1:
         # Multi-variant generation
         from app.services.product.copilot.reply import generate_reply_variants
 
         variants = generate_reply_variants(
             opportunity,
-            project.get("brand_profile"),
+            brand_context,
             prompts,
             voice_profile=voice_profile,
             subreddit_tone_rules=subreddit_tone_rules,
             platform=effective_platform,
             count=payload.variants,
+            llm_model=payload.llm_model,
         )
         if not variants:
             raise HTTPException(status_code=500, detail="Failed to generate any reply variants.")
@@ -145,11 +173,12 @@ def generate_reply_draft(
     # Single reply (default path — unchanged behavior)
     content, rationale, source_prompt = generate_reply(
         opportunity,
-        project.get("brand_profile"),
+        brand_context,
         prompts,
         voice_profile=voice_profile,
         subreddit_tone_rules=subreddit_tone_rules,
         platform=effective_platform,
+        llm_model=payload.llm_model,
     )
 
     draft = create_reply_draft(
@@ -293,7 +322,9 @@ def generate_post_draft(
     ensure_default_prompts(supabase, project["id"])
     prompts = list_prompt_templates_for_project(supabase, project["id"])
 
-    title, body, rationale = ProductCopilot().generate_post(project.get("brand_profile"), prompts)
+    from app.db.tables.projects import resolve_brand_context
+    brand_context = resolve_brand_context(supabase, workspace["id"], project["id"])
+    title, body, rationale = ProductCopilot().generate_post(brand_context, prompts)
 
     # Get next version - batch query
     existing_drafts = list_post_drafts_for_project(supabase, project["id"])

@@ -15,6 +15,7 @@ from app.db.tables.feedback import (
     get_feedback_stats_for_company,
     list_feedback_for_company,
 )
+from app.services.product.feedback_loop import FeedbackLoop
 from app.schemas.v1.feedback import FeedbackCreateRequest, FeedbackResponse
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,13 @@ def submit_feedback(
     ensure_workspace_membership(supabase, workspace["id"], current_user["id"])
     data = payload.model_dump()
     feedback = create_feedback(supabase, data)
+    
+    # Process feedback loop (async in a real app, sync for now)
+    try:
+        FeedbackLoop.process_feedback(feedback, supabase, workspace["id"])
+    except Exception as e:
+        logger.error("Failed to process feedback loop: %s", e)
+        
     return FeedbackResponse.model_validate(feedback)
 
 

@@ -33,7 +33,7 @@ class FeedbackLoop:
     """Processes user feedback to tune keyword weights and source priorities."""
 
     @staticmethod
-    def process_feedback(feedback: dict[str, Any], db: Client) -> dict[str, Any]:
+    def process_feedback(feedback: dict[str, Any], db: Client, workspace_id: int | None = None) -> dict[str, Any]:
         """Process a single feedback record and adjust weights/priorities.
 
         Expected feedback keys:
@@ -105,6 +105,19 @@ class FeedbackLoop:
             logs.append(f"User regenerated draft for opportunity #{opportunity_id}")
         else:
             logs.append(f"Unhandled feedback action: {action} for opportunity #{opportunity_id}")
+
+        # Store memory if a substantive reason was provided
+        if workspace_id and reason and action in ("approved", "copied", "marked_irrelevant", "rejected", "modified"):
+            try:
+                from app.db.tables.memories import create_memory
+                from app.services.infrastructure.embeddings.service import EmbeddingService
+                
+                content = f"User {action} opportunity #{opportunity_id} because: {reason}"
+                embedding = EmbeddingService().embed(content)
+                create_memory(db, workspace_id, content, embedding)
+                logs.append(f"Stored user memory for workspace {workspace_id}")
+            except Exception as e:
+                logger.error("Failed to store memory from feedback: %s", e)
 
         return {
             "opportunity_id": opportunity_id,

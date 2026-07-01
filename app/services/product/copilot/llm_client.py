@@ -17,8 +17,8 @@ class LLMClient:
     continue to use this class unchanged.
     """
 
-    def __init__(self, service: LLMService | None = None) -> None:
-        self._service = service or LLMService()
+    def __init__(self, service: LLMService | None = None, model_override: str | None = None) -> None:
+        self._service = service or LLMService(model_override=model_override)
 
     def call(self, system_prompt: str, user_content: str, temperature: float = 0.2) -> dict | list | None:
         """Call the LLM API and return parsed JSON response."""

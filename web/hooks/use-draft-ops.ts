@@ -22,6 +22,7 @@ import {
 import { updateOpportunityStatus } from "@/lib/api/discovery";
 import { copyText } from "@/lib/reddit";
 import { useToast } from "@/stores/toast";
+import { useUIStore } from "@/stores/ui-store";
 import { getErrorMessage } from "@/types/errors";
 
 export function useDraftOps(token: string | null | undefined) {
@@ -42,9 +43,11 @@ export function useDraftOps(token: string | null | undefined) {
       }
       setGeneratingReplyId(opportunityId);
       try {
+        const { modelPreference } = useUIStore.getState();
         const draft = await generateReply(token, opportunityId, projectId, null, {
           voice_profile_id: options?.voiceProfileId ?? undefined,
           platform: options?.platform ?? undefined,
+          llm_model: modelPreference,
         });
         success("Response drafted");
         return draft;

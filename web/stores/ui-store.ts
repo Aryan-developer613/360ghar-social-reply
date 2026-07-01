@@ -43,6 +43,8 @@ function saveCollapsedSections(sections: Set<string>) {
 }
 
 interface UIState {
+  modelPreference: string;
+  setModelPreference: (model: string) => void;
   sidebarOpen: boolean;
   notifPanelOpen: boolean;
   sidebarCollapsed: boolean;
@@ -59,6 +61,13 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
+  modelPreference: "default",
+  setModelPreference: (model: string) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("rf-model-preference", model);
+    }
+    set({ modelPreference: model });
+  },
   sidebarOpen: false,
   notifPanelOpen: false,
   sidebarCollapsed: loadSidebarCollapsed(),

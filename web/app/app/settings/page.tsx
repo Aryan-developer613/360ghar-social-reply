@@ -14,6 +14,7 @@ import {
   updateWorkspace,
   type NotificationPreferences,
 } from "@/lib/api/workspace";
+import { encryptPayload, generateEncryptionKey } from "@/lib/crypto";
 import { getRedditAccounts, connectReddit as apiConnectReddit, disconnectRedditAccount, type RedditAccount } from "@/lib/api/reddit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -65,7 +66,7 @@ export default function SettingsPage() {
 
   // API Keys tab state
   const [secrets, setSecrets] = useState<SecretRecord[]>([]);
-  const [newSecret, setNewSecret] = useState({ provider: "openai", label: "", value: "" });
+  const [newSecret, setNewSecret] = useState({ provider: "openai", label: "", value: "", encryptClientSide: false });
   const [deleteSecretId, setDeleteSecretId] = useState<number | null>(null);
 
   // BYOK state
@@ -252,12 +253,21 @@ export default function SettingsPage() {
     }
     setLoading(true);
     try {
+      let finalValue = newSecret.value;
+      if (newSecret.encryptClientSide) {
+        const key = await generateEncryptionKey();
+        const { ciphertext, iv } = await encryptPayload(finalValue, key);
+        finalValue = `enc:${iv}:${ciphertext}`;
+        toast.info("Client key generated (Check Console)", "Your key must be stored securely to decrypt this secret.");
+        console.log("CLIENT ENCRYPTION KEY (KEEP SAFE): ", await window.crypto.subtle.exportKey("jwk", key));
+      }
+
       const created = await apiRequest<SecretRecord>("/v1/secrets", {
         method: "POST",
-        body: JSON.stringify(newSecret),
+        body: JSON.stringify({ ...newSecret, value: finalValue }),
       }, token);
       setSecrets((rows) => [created, ...rows]);
-      setNewSecret({ provider: "openai", label: "", value: "" });
+      setNewSecret({ provider: "openai", label: "", value: "", encryptClientSide: false });
       toast.success("API key saved", "Your secret has been securely stored");
     } catch (err) {
       toast.error("Failed to save key", err instanceof Error ? err.message : undefined);
@@ -780,6 +790,16 @@ export default function SettingsPage() {
                     onChange={(e) => setNewSecret({ ...newSecret, value: e.target.value })}
                     placeholder="Paste your API key here"
                   />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="encryptClientSide"
+                    checked={newSecret.encryptClientSide}
+                    onChange={(e) => setNewSecret({ ...newSecret, encryptClientSide: e.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <Label htmlFor="encryptClientSide">Encrypt on client before saving</Label>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button type="submit" disabled={loading}>

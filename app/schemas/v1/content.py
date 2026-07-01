@@ -8,13 +8,14 @@ class ReplyDraftRequest(BaseModel):
     voice_profile_id: int | None = Field(default=None, ge=1)
     platform: str | None = Field(
         default=None,
-        pattern="^(reddit|twitter|linkedin|instagram|x)$",
+        pattern="^(reddit|twitter|linkedin|instagram|x|github|hackernews|youtube|facebook)$",
         description="Override the opportunity's platform for tone selection",
     )
     variants: int = Field(
         default=1, ge=1, le=3,
         description="Number of reply variants to generate (each with slightly different style)",
     )
+    llm_model: str | None = Field(default=None, description="Model override for generation")
 
 
 class ReplyDraftResponse(BaseModel):

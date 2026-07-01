@@ -56,13 +56,21 @@ def get_persona_by_id(db: Client, persona_id: int) -> dict[str, Any] | None:
 
 def create_persona(db: Client, persona_data: dict[str, Any]) -> dict[str, Any]:
     """Create a new persona."""
-    result = db.table(PERSONAS_TABLE).insert(persona_data).execute()
+    data = dict(persona_data)
+    data.pop("source", None)
+    data.pop("is_active", None)
+    data.pop("preferred_subreddits", None)
+    result = db.table(PERSONAS_TABLE).insert(data).execute()
     return result.data[0]
 
 
 def update_persona(db: Client, persona_id: int, update_data: dict[str, Any]) -> dict[str, Any] | None:
     """Update a persona."""
-    result = db.table(PERSONAS_TABLE).update(update_data).eq("id", persona_id).execute()
+    data = dict(update_data)
+    data.pop("source", None)
+    data.pop("is_active", None)
+    data.pop("preferred_subreddits", None)
+    result = db.table(PERSONAS_TABLE).update(data).eq("id", persona_id).execute()
     return result.data[0] if result.data else None
 
 
@@ -364,13 +372,12 @@ def count_opportunities_for_project(db: Client, project_id: int, status: str | N
     return result.count if hasattr(result, "count") and result.count is not None else 0
 
 
-def list_personas_for_project(db: Client, project_id: int, source: str | None = None, limit: int = 100, include_inactive: bool = False) -> list[dict[str, Any]]:
+def list_personas_for_project(
+    db: Client, project_id: int, source: str | None = None, limit: int = 100, include_inactive: bool = False
+) -> list[dict[str, Any]]:
     """List personas for a project with optional source filter."""
     query = db.table(PERSONAS_TABLE).select("*").eq("project_id", project_id)
-    if source:
-        query = query.eq("source", source)
-    if not include_inactive:
-        query = query.eq("is_active", True)
+    # The columns 'source' and 'is_active' do not exist in the database schema yet, so we cannot filter on them
     result = query.order("created_at", desc=True).limit(limit).execute()
     return list(result.data)
 
@@ -458,6 +465,23 @@ def _normalize_opportunity_record(record: dict[str, Any]) -> dict[str, Any]:
     if subreddit_value is not None:
         normalized.setdefault("subreddit_name", subreddit_value)
         normalized.setdefault("subreddit", subreddit_value)
+
+    # Map body to body_excerpt for frontend (handle if body_excerpt is None)
+    if normalized.get("body") and not normalized.get("body_excerpt"):
+        normalized["body_excerpt"] = normalized["body"]
+
+    # Fallback: if body_excerpt is empty, use title
+    if not normalized.get("body_excerpt") and normalized.get("title"):
+        normalized["body_excerpt"] = normalized["title"]
+
+    # Fallback: if title is empty, use body_excerpt (truncated)
+    if not normalized.get("title") and normalized.get("body_excerpt"):
+        normalized["title"] = (normalized["body_excerpt"][:100] + "...") if len(normalized["body_excerpt"]) > 100 else normalized["body_excerpt"]
+
+    # Ensure they are at least empty strings, not None, to avoid React rendering bugs
+    normalized["title"] = normalized.get("title") or "Untitled Post"
+    normalized["body_excerpt"] = normalized.get("body_excerpt") or ""
+
     return normalized
 
 

@@ -190,6 +190,7 @@ def generate_reply(
     voice_profile: dict | None = None,
     subreddit_tone_rules: str | None = None,
     platform: str | None = None,
+    llm_model: str | None = None,
 ) -> tuple[str, str, str]:
     """
     Generate a reply draft for a social media opportunity.
@@ -209,7 +210,7 @@ def generate_reply(
     Raises:
         RuntimeError: If the LLM call fails or returns no usable content.
     """
-    llm = LLMClient()
+    llm = LLMClient(model_override=llm_model)
 
     prompt_context = "\n".join(
         f"{prompt.get('name', '')}: {prompt.get('instructions', '')}"
@@ -260,9 +261,22 @@ def _ai_reply(
     voice_profile: dict | None = None,
     subreddit_tone_rules: str | None = None,
     platform: str | None = None,
+    llm_model: str | None = None,
 ) -> tuple[str, str, str] | None:
     """Generate reply using LLM, with platform-aware tone."""
     effective_platform = (platform or opportunity.get("platform") or "reddit").lower()
+
+    if effective_platform == "reddit" and voice_profile is None and subreddit_tone_rules is None:
+        try:
+            from app.services.infrastructure.llm.service import generate_reply_sync as llm_generate_reply_sync
+
+            agent_prompts = [{"prompt_type": "reply", "name": "Reply", "instructions": prompt_context}]
+            result = llm_generate_reply_sync(opportunity, brand, agent_prompts, model_override=llm_model)
+            if result is not None:
+                return result
+        except Exception as agent_error:
+            logger.warning("Pydantic AI reply agent failed, falling back to legacy: %s", agent_error)
+
     try:
         system_prompt, user_content = _build_prompts(
             opportunity, brand, prompt_context,
@@ -293,6 +307,7 @@ async def generate_reply_async(
     voice_profile: dict | None = None,
     subreddit_tone_rules: str | None = None,
     platform: str | None = None,
+    llm_model: str | None = None,
 ) -> tuple[str, str, str]:
     """Async version of :func:`generate_reply`.
 
@@ -306,7 +321,7 @@ async def generate_reply_async(
     Raises:
         RuntimeError: If the LLM call fails or returns no usable content.
     """
-    llm = LLMClient()
+    llm = LLMClient(model_override=llm_model)
 
     prompt_context = "\n".join(
         f"{prompt.get('name', '')}: {prompt.get('instructions', '')}"
@@ -322,6 +337,7 @@ async def generate_reply_async(
         voice_profile=voice_profile,
         subreddit_tone_rules=subreddit_tone_rules,
         platform=platform,
+        llm_model=llm_model,
     )
     if ai_reply:
         return ai_reply
@@ -340,6 +356,7 @@ async def _ai_reply_async(
     voice_profile: dict | None = None,
     subreddit_tone_rules: str | None = None,
     platform: str | None = None,
+    llm_model: str | None = None,
 ) -> tuple[str, str, str] | None:
     """Async version of :func:`_ai_reply`.
 
@@ -356,7 +373,7 @@ async def _ai_reply_async(
             from app.services.infrastructure.llm.service import generate_reply_async as llm_generate_reply_async
 
             agent_prompts = [{"prompt_type": "reply", "name": "Reply", "instructions": prompt_context}]
-            result = await llm_generate_reply_async(opportunity, brand, agent_prompts)
+            result = await llm_generate_reply_async(opportunity, brand, agent_prompts, model_override=llm_model)
             if result is not None:
                 return result
         except Exception as agent_error:
@@ -394,6 +411,7 @@ def generate_reply_variants(
     subreddit_tone_rules: str | None = None,
     platform: str | None = None,
     count: int = 2,
+    llm_model: str | None = None,
 ) -> list[tuple[str, str, str]]:
     """Generate multiple reply variants with increasing creativity.
 
@@ -406,7 +424,7 @@ def generate_reply_variants(
         Failed variants are silently skipped — the list may be shorter than
         ``count``.
     """
-    llm = LLMClient()
+    llm = LLMClient(model_override=llm_model)
     effective_platform = (platform or opportunity.get("platform") or "reddit").lower()
 
     prompt_context = "\n".join(

@@ -36,24 +36,25 @@ import { Card } from "@/components/ui/card";
 import {
   Loader2,
   Bell,
+  Building2,
   ChevronDown,
   ChevronRight,
   ChevronLeft,
   LogOut,
   LayoutDashboard,
   Workflow,
-  Eye,
-  Search,
   Radar,
   FileText,
-  Users,
-  Palette,
-  UserCircle,
-  Terminal,
   Settings,
+  Users,
   Check,
+  Zap,
   BarChart2,
   Crosshair,
+  Search,
+  Palette,
+  Terminal,
+  Eye,
 } from "lucide-react";
 import { MobileNav } from "@/components/shared/mobile-nav";
 import { ThemeToggle } from "@/components/shared/theme-toggle";
@@ -87,35 +88,16 @@ const NAV_SECTIONS = [
     icon: LayoutDashboard,
     items: [
       { href: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/app/analytics", label: "Analytics", icon: BarChart2 },
-      { href: "/app/agent-runs", label: "Agent Runs", icon: Workflow },
-    ],
-  },
-  {
-    title: "INTELLIGENCE",
-    icon: Search,
-    items: [
-      { href: "/app/company", label: "Company Setup", icon: UserCircle },
-      { href: "/app/brand-brain", label: "Brand Brain", icon: Palette },
-      { href: "/app/competitors", label: "Competitor Intel", icon: Crosshair },
-      { href: "/app/sources", label: "Sources", icon: Search },
-    ],
-  },
-  {
-    title: "OPPORTUNITIES",
-    icon: Radar,
-    items: [
-      { href: "/app/agents", label: "Agents Feed", icon: Radar },
+      { href: "/app/workflow", label: "Workflow", icon: Workflow },
       { href: "/app/discovery", label: "Social Radar", icon: Radar },
       { href: "/app/content", label: "Content Studio", icon: FileText },
     ],
   },
   {
-    title: "OPTIMIZE",
-    icon: Eye,
+    title: "COMPANY",
+    icon: Building2,
     items: [
-      { href: "/app/seo-geo", label: "SEO / GEO", icon: Eye },
-      { href: "/app/visibility", label: "AI Visibility", icon: Eye },
+      { href: "/app/company", label: "Company Profile", icon: Building2 },
     ],
   },
   {
@@ -127,26 +109,35 @@ const NAV_SECTIONS = [
   },
 ];
 
+const AI_MODELS = [
+  { id: "default", name: "Default Model (GPT-4o Mini)" },
+  { id: "gpt-4o", name: "GPT-4o" },
+  { id: "claude-3-5-sonnet", name: "Claude 3.5 Sonnet" }
+];
+
 const PATH_TITLES: Record<string, string> = {
   "/app/dashboard": "Dashboard",
-  "/app/auto-pipeline": "Overview / Auto Pipeline",
-  "/app/agent-runs": "Overview / Agent Runs",
-  "/app/analytics": "Overview / Analytics",
-  "/app/company": "Intelligence / Company Setup",
-  "/app/brand-brain": "Intelligence / Brand Brain",
-  "/app/competitors": "Intelligence / Competitor Intel",
-  "/app/sources": "Intelligence / Sources",
-  "/app/agents": "Opportunities / Agents Feed",
-  "/app/discovery": "Opportunities / Social Radar",
-  "/app/content": "Opportunities / Content Studio",
-  "/app/content-studio": "Opportunities / Content Studio (New)",
-  "/app/subreddits": "Engage / Communities",
-  "/app/brand": "Configure / Brand Profile",
-  "/app/persona": "Configure / Personas",
-  "/app/prompts": "Configure / Prompts",
-  "/app/seo-geo": "Optimize / SEO / GEO",
-  "/app/visibility": "Optimize / AI Visibility",
+  "/app/workflow": "Pipeline Workflow",
+  "/app/discovery": "Social Radar",
+  "/app/content": "Content Studio",
   "/app/settings": "Settings",
+  "/app/analytics": "Analytics",
+  "/app/agent-runs": "Agent Runs",
+  "/app/brand-brain": "Brand Brain",
+  "/app/competitors": "Competitor Intel",
+  "/app/sources": "Sources",
+  "/app/seo-geo": "SEO / GEO",
+  "/app/visibility": "AI Visibility",
+  // Reachable via direct URL only (superseded by Workflow page steps,
+  // or kept for backward-compat links)
+  "/app/auto-pipeline": "Auto Pipeline",
+  "/app/company": "Company Setup",
+  "/app/persona": "Personas",
+  "/app/subreddits": "Communities",
+  "/app/agents": "Agents Feed",
+  "/app/brand": "Brand Profile",
+  "/app/prompts": "Prompts",
+  "/app/content-studio": "Content Studio",
 };
 
 /** Group notifications into Today / Yesterday / Older buckets. */
@@ -191,7 +182,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   // Separate state for desktop and mobile notification popovers to avoid conflicts
   const [desktopNotifOpen, setDesktopNotifOpen] = useState(false);
   const [mobileNotifOpen, setMobileNotifOpen] = useState(false);
-  const { sidebarOpen, setSidebarOpen } = useUIStore();
+  const { sidebarOpen, setSidebarOpen, modelPreference, setModelPreference } = useUIStore();
 
   const notificationGroups = useMemo(() => groupNotifications(notifications), [notifications]);
 
@@ -645,7 +636,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
                             href={item.href}
                             className={cn(
                               "flex items-center gap-2.5 rounded-md mx-1 px-2.5 py-2 text-sm text-sidebar-foreground/80 no-underline transition-all duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                              isActive && "bg-coral-glow text-primary font-medium"
+                              isActive && "bg-coral-glow text-primary font-medium",
+                              (item as any).indent && "ml-4"
                             )}
                             onClick={() => setSidebarOpen(false)}
                           >
@@ -720,6 +712,26 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <h1 className="text-lg font-semibold text-foreground">{currentTitle}</h1>
           </div>
           <div className="flex items-center gap-3">
+            <div className="hidden md:block">
+              <DropdownMenu>
+                <DropdownMenuTrigger className="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 text-xs px-3 font-medium">
+                  {AI_MODELS.find(m => m.id === modelPreference)?.name || "Default Model"}
+                  <ChevronDown className="ml-2 h-3 w-3" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {AI_MODELS.map(model => (
+                    <DropdownMenuItem 
+                      key={model.id} 
+                      onClick={() => setModelPreference(model.id)}
+                      className="text-xs"
+                    >
+                      {modelPreference === model.id && <Check className="mr-2 h-3 w-3" />}
+                      <span className={modelPreference !== model.id ? "ml-5" : ""}>{model.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             <ThemeToggle className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" />
             {/* Notification popover (hidden on mobile) */}
             <div className="hidden md:block">
